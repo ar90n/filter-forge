@@ -6,6 +6,7 @@
 
 // Re-export Python-derived types (generated from TypedDict / Literal annotations)
 export type {
+  Characteristics,
   FilterType,
   Approximation,
   ComponentType,

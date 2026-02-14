@@ -14,6 +14,8 @@ function formatValue(comp: Component): string {
       return formatInductance(comp.value)
     case 'resistor':
       return formatResistance(comp.value)
+    case 'opamp':
+      return '-'
   }
 }
 
@@ -25,11 +27,20 @@ function formatType(type: Component['type']): string {
       return 'Inductor'
     case 'resistor':
       return 'Resistor'
+    case 'opamp':
+      return 'Op-Amp'
   }
 }
 
 function formatPosition(position: Component['position']): string {
-  return position === 'series' ? 'Series' : 'Shunt'
+  switch (position) {
+    case 'series':
+      return 'Series'
+    case 'shunt':
+      return 'Shunt'
+    case 'active':
+      return 'Active'
+  }
 }
 
 function buildCsv(components: Component[]): string {

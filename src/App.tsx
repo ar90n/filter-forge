@@ -21,7 +21,10 @@ function App() {
 
   const handleDesign = useCallback(
     (params: FilterParams) => {
-      setImpedance({ source: params.sourceImpedance, load: params.loadImpedance })
+      setImpedance({
+        source: params.sourceImpedance ?? 0,
+        load: params.loadImpedance ?? 0,
+      })
       return designFilter(params)
     },
     [designFilter],

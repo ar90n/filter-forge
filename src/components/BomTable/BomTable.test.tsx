@@ -9,6 +9,12 @@ const SAMPLE_COMPONENTS: Component[] = [
   { id: 'L2', type: 'inductor', value: 0.00796, position: 'series' },
 ]
 
+const SALLEN_KEY_COMPONENTS: Component[] = [
+  { id: 'S1_R1', type: 'resistor', value: 10000, position: 'series' },
+  { id: 'S1_C1', type: 'capacitor', value: 1.59e-8, position: 'shunt' },
+  { id: 'S1_U', type: 'opamp', value: 0, position: 'active' },
+]
+
 // Set up clipboard mock for jsdom
 const mockWriteText = vi.fn().mockResolvedValue(undefined)
 Object.defineProperty(window.navigator, 'clipboard', {
@@ -69,5 +75,24 @@ describe('BomTable', () => {
     await waitFor(() => {
       expect(screen.getByText('Copied!')).toBeInTheDocument()
     })
+  })
+
+  it('displays op-amp components correctly', () => {
+    render(<BomTable components={SALLEN_KEY_COMPONENTS} />)
+    expect(screen.getByTestId('bom-table')).toBeInTheDocument()
+
+    // Op-amp row
+    expect(screen.getByText('S1_U')).toBeInTheDocument()
+    expect(screen.getByText('Op-Amp')).toBeInTheDocument()
+    expect(screen.getByText('-')).toBeInTheDocument()
+    expect(screen.getByText('Active')).toBeInTheDocument()
+
+    // Resistor row
+    expect(screen.getByText('S1_R1')).toBeInTheDocument()
+    expect(screen.getByText('Resistor')).toBeInTheDocument()
+
+    // Capacitor row
+    expect(screen.getByText('S1_C1')).toBeInTheDocument()
+    expect(screen.getByText('Capacitor')).toBeInTheDocument()
   })
 })

@@ -17,6 +17,8 @@ function formatComponentValue(comp: Component): string {
       return formatInductance(comp.value)
     case 'resistor':
       return formatResistance(comp.value)
+    case 'opamp':
+      return 'Op-Amp'
   }
 }
 
@@ -737,6 +739,305 @@ function LatticeLayout({
   )
 }
 
+// --- Sallen-Key layout ---
+// Each stage: Vin ──[R1/C1]──┬──[R2/C2]──┬──[▷ OpAmp]── Vout
+//                            │           │       │
+//                           [C1/R1]    [C2/R2]──┘ (feedback)
+//                            │
+//                           GND
+
+/**
+ * Op-amp triangle glyph.
+ * Triangle pointing right with + and - inputs on left, output on right.
+ * Size: ~40w × 40h. Input pins: (x, y+10) non-inv, (x, y+30) inv. Output: (x+40, y+20)
+ */
+function OpAmpGlyph({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x}, ${y})`}>
+      {/* Triangle body */}
+      <polygon
+        points="0,0 40,20 0,40"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      {/* + input label */}
+      <text x="6" y="16" fontSize="10" fill="currentColor" fontWeight="bold">+</text>
+      {/* − input label */}
+      <text x="6" y="34" fontSize="10" fill="currentColor" fontWeight="bold">−</text>
+    </g>
+  )
+}
+
+type SallenKeyStage = {
+  stageNum: number
+  passiveComps: Component[]
+  opamp: Component | null
+}
+
+function parseSallenKeyStages(components: Component[]): SallenKeyStage[] {
+  const stages: SallenKeyStage[] = []
+  let currentPassive: Component[] = []
+  let currentStageNum = 0
+
+  for (const comp of components) {
+    // Extract stage number from id like "S1_R1"
+    const match = comp.id.match(/^S(\d+)_/)
+    const stageNum = match ? parseInt(match[1], 10) : 0
+
+    if (stageNum !== currentStageNum && currentPassive.length > 0) {
+      stages.push({ stageNum: currentStageNum, passiveComps: currentPassive, opamp: null })
+      currentPassive = []
+    }
+    currentStageNum = stageNum
+
+    if (comp.type === 'opamp') {
+      stages.push({ stageNum, passiveComps: currentPassive, opamp: comp })
+      currentPassive = []
+      currentStageNum = 0
+    } else {
+      currentPassive.push(comp)
+    }
+  }
+
+  if (currentPassive.length > 0) {
+    stages.push({ stageNum: currentStageNum, passiveComps: currentPassive, opamp: null })
+  }
+
+  return stages
+}
+
+function SallenKeyLayout({ components }: { components: Component[] }) {
+  const stages = parseSallenKeyStages(components)
+
+  // Layout constants for Sallen-Key
+  const stageW = 320
+  const stageGap = 40
+  const marginL = 40
+  const marginR = 40
+  const topPad = 20
+  const mainLineY = 60
+  const gndY = 170
+  const opAmpX = 220 // X offset of op-amp within stage
+  const opAmpY = mainLineY - 10 // Y position to align non-inv input with main line
+
+  const totalWidth = marginL + stages.length * (stageW + stageGap) - stageGap + marginR
+  const totalHeight = gndY + 30
+
+  return (
+    <svg
+      viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+      width="100%"
+      preserveAspectRatio="xMidYMid meet"
+      className="text-gray-800"
+      role="img"
+      aria-label="Sallen-Key circuit diagram"
+    >
+      {/* Ground reference line */}
+      <line
+        x1={20} y1={gndY} x2={totalWidth - 20} y2={gndY}
+        stroke="#d1d5db" strokeWidth="0.5" strokeDasharray="4,4"
+      />
+
+      {/* Vin label */}
+      <text x={marginL - 8} y={mainLineY - 16} fontSize="9" fill="#374151" fontWeight="bold">Vin</text>
+
+      {stages.map((stage, stageIdx) => {
+        const stageX = marginL + stageIdx * (stageW + stageGap)
+        const passives = stage.passiveComps
+        // Identify series and shunt components
+        const seriesComps = passives.filter((c) => c.position === 'series')
+        const shuntComps = passives.filter((c) => c.position === 'shunt')
+
+        const lineY = mainLineY + WIRE_CENTER_Y
+
+        // Series component 1 position
+        const s1x = stageX + 10
+        // Series component 2 position
+        const s2x = stageX + 110
+        // Junction between series 1 and series 2
+        const junctionX = s1x + SERIES_W + 15
+        // Junction after series 2 (before op-amp)
+        const junction2X = s2x + SERIES_W + 10
+
+        return (
+          <g key={stageIdx}>
+            {/* Stage label */}
+            <text x={stageX + stageW / 2} y={topPad} textAnchor="middle" fontSize="10" fill="#9ca3af">
+              Stage {stage.stageNum}
+            </text>
+
+            {/* Input wire */}
+            <line x1={stageX} y1={lineY} x2={s1x} y2={lineY}
+              stroke="currentColor" strokeWidth="1.5" />
+
+            {/* Series component 1 */}
+            {seriesComps[0] && (
+              <g>
+                <SeriesGlyph type={seriesComps[0].type} x={s1x} y={mainLineY} />
+                <text x={s1x + SERIES_W / 2} y={mainLineY - 14}
+                  textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
+                  {seriesComps[0].id.replace(/^S\d+_/, '')}
+                </text>
+                <text x={s1x + SERIES_W / 2} y={mainLineY - 2}
+                  textAnchor="middle" fontSize="8" fill="#6b7280">
+                  {formatComponentValue(seriesComps[0])}
+                </text>
+              </g>
+            )}
+
+            {/* Wire to junction */}
+            <line x1={s1x + SERIES_W} y1={lineY} x2={junctionX} y2={lineY}
+              stroke="currentColor" strokeWidth="1.5" />
+            <circle cx={junctionX} cy={lineY} r="2.5" fill="currentColor" />
+
+            {/* Shunt component 1 (from junction to ground) */}
+            {shuntComps[0] && (
+              <g>
+                <line x1={junctionX} y1={lineY} x2={junctionX} y2={lineY + 10}
+                  stroke="currentColor" strokeWidth="1.5" />
+                <ShuntGlyph type={shuntComps[0].type} centerX={junctionX} topY={lineY + 10} />
+                <text x={junctionX + 18} y={lineY + 10 + shuntHeight(shuntComps[0].type) / 2 - 4}
+                  fontSize="8" fill="#374151" fontWeight="bold">
+                  {shuntComps[0].id.replace(/^S\d+_/, '')}
+                </text>
+                <text x={junctionX + 18} y={lineY + 10 + shuntHeight(shuntComps[0].type) / 2 + 8}
+                  fontSize="8" fill="#6b7280">
+                  {formatComponentValue(shuntComps[0])}
+                </text>
+                <line x1={junctionX} y1={lineY + 10 + shuntHeight(shuntComps[0].type)} x2={junctionX} y2={gndY}
+                  stroke="currentColor" strokeWidth="1.5" />
+                <Ground x={junctionX} y={gndY} />
+              </g>
+            )}
+
+            {/* Wire junction to series 2 */}
+            <line x1={junctionX} y1={lineY} x2={s2x} y2={lineY}
+              stroke="currentColor" strokeWidth="1.5" />
+
+            {/* Series component 2 */}
+            {seriesComps[1] && (
+              <g>
+                <SeriesGlyph type={seriesComps[1].type} x={s2x} y={mainLineY} />
+                <text x={s2x + SERIES_W / 2} y={mainLineY - 14}
+                  textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
+                  {seriesComps[1].id.replace(/^S\d+_/, '')}
+                </text>
+                <text x={s2x + SERIES_W / 2} y={mainLineY - 2}
+                  textAnchor="middle" fontSize="8" fill="#6b7280">
+                  {formatComponentValue(seriesComps[1])}
+                </text>
+              </g>
+            )}
+
+            {/* Wire to junction 2 (op-amp non-inv input) */}
+            <line x1={s2x + SERIES_W} y1={lineY} x2={junction2X} y2={lineY}
+              stroke="currentColor" strokeWidth="1.5" />
+            <circle cx={junction2X} cy={lineY} r="2.5" fill="currentColor" />
+
+            {/* Shunt component 2 (feedback from output to junction2) */}
+            {shuntComps[1] && (
+              <g>
+                {/* Down from junction2 */}
+                <line x1={junction2X} y1={lineY} x2={junction2X} y2={lineY + 10}
+                  stroke="currentColor" strokeWidth="1.5" />
+                <ShuntGlyph type={shuntComps[1].type} centerX={junction2X} topY={lineY + 10} />
+                <text x={junction2X - 18} y={lineY + 10 + shuntHeight(shuntComps[1].type) / 2 - 4}
+                  textAnchor="end" fontSize="8" fill="#374151" fontWeight="bold">
+                  {shuntComps[1].id.replace(/^S\d+_/, '')}
+                </text>
+                <text x={junction2X - 18} y={lineY + 10 + shuntHeight(shuntComps[1].type) / 2 + 8}
+                  textAnchor="end" fontSize="8" fill="#6b7280">
+                  {formatComponentValue(shuntComps[1])}
+                </text>
+                {/* Connect bottom of C2 to op-amp output (feedback wire) */}
+                {(() => {
+                  const c2BottomY = lineY + 10 + shuntHeight(shuntComps[1].type)
+                  const fbWireY = c2BottomY + 10
+                  const opOutX = stageX + opAmpX + 40
+                  return (
+                    <>
+                      <line x1={junction2X} y1={c2BottomY} x2={junction2X} y2={fbWireY}
+                        stroke="currentColor" strokeWidth="1.5" />
+                      <line x1={junction2X} y1={fbWireY} x2={opOutX} y2={fbWireY}
+                        stroke="currentColor" strokeWidth="1.5" />
+                      <line x1={opOutX} y1={fbWireY} x2={opOutX} y2={opAmpY + 20}
+                        stroke="currentColor" strokeWidth="1.5" />
+                    </>
+                  )
+                })()}
+              </g>
+            )}
+
+            {/* Wire from junction2 to op-amp non-inverting input (+) */}
+            <line x1={junction2X} y1={lineY} x2={stageX + opAmpX} y2={opAmpY + 10}
+              stroke="currentColor" strokeWidth="1.5" />
+
+            {/* Op-amp inverting input (−) → connected to output (unity gain) */}
+            <line x1={stageX + opAmpX} y1={opAmpY + 30}
+              x2={stageX + opAmpX - 10} y2={opAmpY + 30}
+              stroke="currentColor" strokeWidth="1.5" />
+            {/* Wire down then right to output */}
+            {(() => {
+              const invX = stageX + opAmpX - 10
+              const invY = opAmpY + 30
+              const opOutX = stageX + opAmpX + 40
+              const opOutY = opAmpY + 20
+              const wireDownY = invY + 16
+              return (
+                <>
+                  <line x1={invX} y1={invY} x2={invX} y2={wireDownY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  <line x1={invX} y1={wireDownY} x2={opOutX} y2={wireDownY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  <line x1={opOutX} y1={wireDownY} x2={opOutX} y2={opOutY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                </>
+              )
+            })()}
+
+            {/* Op-amp glyph */}
+            <OpAmpGlyph x={stageX + opAmpX} y={opAmpY} />
+
+            {/* Op-amp label */}
+            {stage.opamp && (
+              <text x={stageX + opAmpX + 20} y={opAmpY - 6}
+                textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
+                {stage.opamp.id.replace(/^S\d+_/, '')}
+              </text>
+            )}
+
+            {/* Output wire */}
+            <line x1={stageX + opAmpX + 40} y1={opAmpY + 20}
+              x2={stageX + stageW} y2={opAmpY + 20}
+              stroke="currentColor" strokeWidth="1.5" />
+            <circle cx={stageX + opAmpX + 40} cy={opAmpY + 20} r="2.5" fill="currentColor" />
+
+            {/* Inter-stage wire */}
+            {stageIdx < stages.length - 1 && (
+              <line x1={stageX + stageW} y1={opAmpY + 20}
+                x2={stageX + stageW + stageGap} y2={lineY}
+                stroke="currentColor" strokeWidth="1.5" />
+            )}
+          </g>
+        )
+      })}
+
+      {/* Vout label */}
+      {stages.length > 0 && (
+        <text
+          x={marginL + stages.length * (stageW + stageGap) - stageGap - 8}
+          y={mainLineY + WIRE_CENTER_Y - 16}
+          fontSize="9" fill="#374151" fontWeight="bold"
+        >
+          Vout
+        </text>
+      )}
+    </svg>
+  )
+}
+
 // --- SVG Export ---
 function saveSvgAsPng(svgElement: SVGSVGElement, filename: string) {
   // Get pixel dimensions from viewBox
@@ -822,7 +1123,9 @@ export function CircuitDiagram({
         </button>
       </div>
       <div ref={svgContainerRef}>
-        {topology === 'lattice' ? (
+        {topology === 'sallen-key' ? (
+          <SallenKeyLayout components={components} />
+        ) : topology === 'lattice' ? (
           <LatticeLayout
             components={components}
             sourceImpedance={sourceImpedance}

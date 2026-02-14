@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FilterType, Approximation, FilterParams, FrequencyUnit } from '@/types/filter.ts'
+import type { FilterType, Characteristics, Approximation, FilterParams, FrequencyUnit } from '@/types/filter.ts'
 import { convertToHz } from '@/lib/units.ts'
 
 type FilterFormProps = {
@@ -10,12 +10,19 @@ type FilterFormProps = {
 type ValidationErrors = Partial<Record<string, string>>
 
 const FILTER_TYPES: { value: FilterType; label: string }[] = [
+  { value: 'lc_passive', label: 'LC Passive' },
+  { value: 'active_sallen_key', label: 'Active (Sallen-Key)' },
+]
+
+const ALL_CHARACTERISTICS: { value: Characteristics; label: string }[] = [
   { value: 'lpf', label: 'Low-Pass Filter (LPF)' },
   { value: 'hpf', label: 'High-Pass Filter (HPF)' },
   { value: 'bpf', label: 'Band-Pass Filter (BPF)' },
   { value: 'bef', label: 'Band-Elimination Filter (BEF)' },
   { value: 'apf', label: 'All-Pass Filter (APF)' },
 ]
+
+const SALLEN_KEY_CHARACTERISTICS: Characteristics[] = ['lpf', 'hpf', 'bpf']
 
 const APPROXIMATIONS: { value: Approximation; label: string }[] = [
   { value: 'butterworth', label: 'Butterworth' },
@@ -27,20 +34,20 @@ const APPROXIMATIONS: { value: Approximation; label: string }[] = [
 
 const FREQUENCY_UNITS: FrequencyUnit[] = ['Hz', 'kHz', 'MHz']
 
-function needsCutoff(ft: FilterType): boolean {
-  return ft === 'lpf' || ft === 'hpf'
+function needsCutoff(c: Characteristics): boolean {
+  return c === 'lpf' || c === 'hpf'
 }
 
-function needsCenter(ft: FilterType): boolean {
-  return ft === 'bpf' || ft === 'bef' || ft === 'apf'
+function needsCenter(c: Characteristics): boolean {
+  return c === 'bpf' || c === 'bef' || c === 'apf'
 }
 
-function needsBandwidth(ft: FilterType): boolean {
-  return ft === 'bpf' || ft === 'bef'
+function needsBandwidth(c: Characteristics): boolean {
+  return c === 'bpf' || c === 'bef'
 }
 
-function needsApproximation(ft: FilterType): boolean {
-  return ft !== 'apf'
+function needsApproximation(c: Characteristics): boolean {
+  return c !== 'apf'
 }
 
 function needsRipple(approx: Approximation): boolean {
@@ -51,8 +58,13 @@ function needsAttenuation(approx: Approximation): boolean {
   return approx === 'chebyshev2' || approx === 'elliptic'
 }
 
+function isSallenKey(ft: FilterType): boolean {
+  return ft === 'active_sallen_key'
+}
+
 export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
-  const [filterType, setFilterType] = useState<FilterType>('lpf')
+  const [filterType, setFilterType] = useState<FilterType>('lc_passive')
+  const [characteristics, setCharacteristics] = useState<Characteristics>('lpf')
   const [approximation, setApproximation] = useState<Approximation>('butterworth')
   const [cutoffFreq, setCutoffFreq] = useState('1')
   const [cutoffUnit, setCutoffUnit] = useState<FrequencyUnit>('kHz')
@@ -67,6 +79,30 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
   const [loadImpedance, setLoadImpedance] = useState('50')
   const [errors, setErrors] = useState<ValidationErrors>({})
 
+  // Derive the available characteristics based on filter type
+  const availableCharacteristics = isSallenKey(filterType)
+    ? ALL_CHARACTERISTICS.filter((c) => SALLEN_KEY_CHARACTERISTICS.includes(c.value))
+    : ALL_CHARACTERISTICS
+
+  function handleFilterTypeChange(newFilterType: FilterType) {
+    setFilterType(newFilterType)
+    // Reset characteristics if current value is not supported by new filter type
+    if (newFilterType === 'active_sallen_key') {
+      if (!SALLEN_KEY_CHARACTERISTICS.includes(characteristics)) {
+        setCharacteristics('lpf')
+      }
+      // Round order up to nearest even number for Sallen-Key
+      const orderNum = parseInt(order, 10)
+      if (!isNaN(orderNum) && orderNum % 2 !== 0) {
+        setOrder(String(Math.min(orderNum + 1, 10)))
+      }
+      // Minimum order 2 for Sallen-Key
+      if (!isNaN(orderNum) && orderNum < 2) {
+        setOrder('2')
+      }
+    }
+  }
+
   function validate(): ValidationErrors {
     const e: ValidationErrors = {}
     const orderNum = parseInt(order, 10)
@@ -75,17 +111,26 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       e.order = 'Filter order must be an integer between 1 and 10.'
     }
 
-    if (needsCutoff(filterType)) {
+    if (isSallenKey(filterType)) {
+      if (!isNaN(orderNum) && orderNum % 2 !== 0) {
+        e.order = 'Sallen-Key requires an even order (2, 4, 6, 8, 10).'
+      }
+      if (!isNaN(orderNum) && orderNum < 2) {
+        e.order = 'Sallen-Key requires an order of at least 2.'
+      }
+    }
+
+    if (needsCutoff(characteristics)) {
       const v = parseFloat(cutoffFreq)
       if (isNaN(v) || v <= 0) e.cutoffFreq = 'Cutoff frequency must be positive.'
     }
 
-    if (needsCenter(filterType)) {
+    if (needsCenter(characteristics)) {
       const v = parseFloat(centerFreq)
       if (isNaN(v) || v <= 0) e.centerFreq = 'Center frequency must be positive.'
     }
 
-    if (needsBandwidth(filterType)) {
+    if (needsBandwidth(characteristics)) {
       const bw = parseFloat(bandwidth)
       const cf = parseFloat(centerFreq)
       if (isNaN(bw) || bw <= 0) {
@@ -95,21 +140,23 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       }
     }
 
-    if (needsApproximation(filterType) && needsRipple(approximation)) {
+    if (needsApproximation(characteristics) && needsRipple(approximation)) {
       const v = parseFloat(ripple)
       if (isNaN(v) || v <= 0) e.ripple = 'Passband ripple must be positive.'
     }
 
-    if (needsApproximation(filterType) && needsAttenuation(approximation)) {
+    if (needsApproximation(characteristics) && needsAttenuation(approximation)) {
       const v = parseFloat(attenuation)
       if (isNaN(v) || v <= 0) e.attenuation = 'Stopband attenuation must be positive.'
     }
 
-    const srcZ = parseFloat(sourceImpedance)
-    if (isNaN(srcZ) || srcZ <= 0) e.sourceImpedance = 'Source impedance must be positive.'
+    if (!isSallenKey(filterType)) {
+      const srcZ = parseFloat(sourceImpedance)
+      if (isNaN(srcZ) || srcZ <= 0) e.sourceImpedance = 'Source impedance must be positive.'
 
-    const loadZ = parseFloat(loadImpedance)
-    if (isNaN(loadZ) || loadZ <= 0) e.loadImpedance = 'Load impedance must be positive.'
+      const loadZ = parseFloat(loadImpedance)
+      if (isNaN(loadZ) || loadZ <= 0) e.loadImpedance = 'Load impedance must be positive.'
+    }
 
     return e
   }
@@ -122,25 +169,29 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
 
     const params: FilterParams = {
       filterType,
+      characteristics,
       approximation,
       order: parseInt(order, 10),
-      cutoffFrequency: needsCutoff(filterType)
+      cutoffFrequency: needsCutoff(characteristics)
         ? convertToHz(parseFloat(cutoffFreq), cutoffUnit)
         : 0,
-      sourceImpedance: parseFloat(sourceImpedance),
-      loadImpedance: parseFloat(loadImpedance),
     }
 
-    if (needsCenter(filterType)) {
+    if (!isSallenKey(filterType)) {
+      params.sourceImpedance = parseFloat(sourceImpedance)
+      params.loadImpedance = parseFloat(loadImpedance)
+    }
+
+    if (needsCenter(characteristics)) {
       params.centerFrequency = convertToHz(parseFloat(centerFreq), centerUnit)
     }
-    if (needsBandwidth(filterType)) {
+    if (needsBandwidth(characteristics)) {
       params.bandwidth = convertToHz(parseFloat(bandwidth), bandwidthUnit)
     }
-    if (needsApproximation(filterType) && needsRipple(approximation)) {
+    if (needsApproximation(characteristics) && needsRipple(approximation)) {
       params.passbandRipple = parseFloat(ripple)
     }
-    if (needsApproximation(filterType) && needsAttenuation(approximation)) {
+    if (needsApproximation(characteristics) && needsAttenuation(approximation)) {
       params.stopbandAttenuation = parseFloat(attenuation)
     }
 
@@ -156,14 +207,14 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-3">
-      {/* Filter type */}
+      {/* Filter type (LC Passive / Active Sallen-Key) */}
       <div>
         <label htmlFor="ff-filter-type" className={labelClass}>Filter Type</label>
         <select
           id="ff-filter-type"
           className={selectClass}
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value as FilterType)}
+          onChange={(e) => handleFilterTypeChange(e.target.value as FilterType)}
         >
           {FILTER_TYPES.map((ft) => (
             <option key={ft.value} value={ft.value}>
@@ -173,8 +224,25 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
         </select>
       </div>
 
+      {/* Characteristics (LPF/HPF/BPF/BEF/APF) */}
+      <div>
+        <label htmlFor="ff-characteristics" className={labelClass}>Characteristics</label>
+        <select
+          id="ff-characteristics"
+          className={selectClass}
+          value={characteristics}
+          onChange={(e) => setCharacteristics(e.target.value as Characteristics)}
+        >
+          {availableCharacteristics.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Approximation function (hidden for APF) */}
-      {needsApproximation(filterType) && (
+      {needsApproximation(characteristics) && (
         <div>
           <label htmlFor="ff-approximation" className={labelClass}>Approximation</label>
           <select
@@ -193,7 +261,7 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       )}
 
       {/* Cutoff frequency (LPF/HPF) */}
-      {needsCutoff(filterType) && (
+      {needsCutoff(characteristics) && (
         <div>
           <label htmlFor="ff-cutoff-freq" className={labelClass}>Cutoff Frequency</label>
           <div className="flex gap-1">
@@ -224,7 +292,7 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       )}
 
       {/* Center frequency (BPF/BEF/APF) */}
-      {needsCenter(filterType) && (
+      {needsCenter(characteristics) && (
         <div>
           <label htmlFor="ff-center-freq" className={labelClass}>Center Frequency</label>
           <div className="flex gap-1">
@@ -255,7 +323,7 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       )}
 
       {/* Bandwidth (BPF/BEF) */}
-      {needsBandwidth(filterType) && (
+      {needsBandwidth(characteristics) && (
         <div>
           <label htmlFor="ff-bandwidth" className={labelClass}>Bandwidth</label>
           <div className="flex gap-1">
@@ -294,15 +362,15 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
           className={inputClass}
           value={order}
           onChange={(e) => setOrder(e.target.value)}
-          min="1"
+          min={isSallenKey(filterType) ? '2' : '1'}
           max="10"
-          step="1"
+          step={isSallenKey(filterType) ? '2' : '1'}
         />
         {errors.order && <p className={errorClass}>{errors.order}</p>}
       </div>
 
       {/* Passband ripple */}
-      {needsApproximation(filterType) && needsRipple(approximation) && (
+      {needsApproximation(characteristics) && needsRipple(approximation) && (
         <div>
           <label htmlFor="ff-ripple" className={labelClass}>Passband Ripple (dB)</label>
           <input
@@ -319,7 +387,7 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
       )}
 
       {/* Stopband attenuation */}
-      {needsApproximation(filterType) && needsAttenuation(approximation) && (
+      {needsApproximation(characteristics) && needsAttenuation(approximation) && (
         <div>
           <label htmlFor="ff-attenuation" className={labelClass}>Stopband Attenuation (dB)</label>
           <input
@@ -335,35 +403,39 @@ export function FilterForm({ onSubmit, disabled = false }: FilterFormProps) {
         </div>
       )}
 
-      {/* Source impedance */}
-      <div>
-        <label htmlFor="ff-source-z" className={labelClass}>Source Impedance (Ω)</label>
-        <input
-          id="ff-source-z"
-          type="number"
-          className={inputClass}
-          value={sourceImpedance}
-          onChange={(e) => setSourceImpedance(e.target.value)}
-          step="any"
-          min="0"
-        />
-        {errors.sourceImpedance && <p className={errorClass}>{errors.sourceImpedance}</p>}
-      </div>
+      {/* Source impedance (LC Passive only) */}
+      {!isSallenKey(filterType) && (
+        <div>
+          <label htmlFor="ff-source-z" className={labelClass}>Source Impedance (Ω)</label>
+          <input
+            id="ff-source-z"
+            type="number"
+            className={inputClass}
+            value={sourceImpedance}
+            onChange={(e) => setSourceImpedance(e.target.value)}
+            step="any"
+            min="0"
+          />
+          {errors.sourceImpedance && <p className={errorClass}>{errors.sourceImpedance}</p>}
+        </div>
+      )}
 
-      {/* Load impedance */}
-      <div>
-        <label htmlFor="ff-load-z" className={labelClass}>Load Impedance (Ω)</label>
-        <input
-          id="ff-load-z"
-          type="number"
-          className={inputClass}
-          value={loadImpedance}
-          onChange={(e) => setLoadImpedance(e.target.value)}
-          step="any"
-          min="0"
-        />
-        {errors.loadImpedance && <p className={errorClass}>{errors.loadImpedance}</p>}
-      </div>
+      {/* Load impedance (LC Passive only) */}
+      {!isSallenKey(filterType) && (
+        <div>
+          <label htmlFor="ff-load-z" className={labelClass}>Load Impedance (Ω)</label>
+          <input
+            id="ff-load-z"
+            type="number"
+            className={inputClass}
+            value={loadImpedance}
+            onChange={(e) => setLoadImpedance(e.target.value)}
+            step="any"
+            min="0"
+          />
+          {errors.loadImpedance && <p className={errorClass}>{errors.loadImpedance}</p>}
+        </div>
+      )}
 
       {/* Calculate button */}
       <button

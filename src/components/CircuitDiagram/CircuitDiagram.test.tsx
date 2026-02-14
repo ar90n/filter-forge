@@ -14,6 +14,14 @@ const LATTICE_COMPONENTS: Component[] = [
   { id: 'C1', type: 'capacitor', value: 3.18e-7, position: 'shunt' },
 ]
 
+const SALLEN_KEY_COMPONENTS: Component[] = [
+  { id: 'S1_R1', type: 'resistor', value: 10000, position: 'series' },
+  { id: 'S1_R2', type: 'resistor', value: 10000, position: 'series' },
+  { id: 'S1_C1', type: 'capacitor', value: 1.59e-8, position: 'shunt' },
+  { id: 'S1_C2', type: 'capacitor', value: 1.59e-8, position: 'shunt' },
+  { id: 'S1_U', type: 'opamp', value: 0, position: 'active' },
+]
+
 describe('CircuitDiagram', () => {
   it('shows placeholder when components is null', () => {
     render(<CircuitDiagram components={null} topology={null} />)
@@ -78,5 +86,26 @@ describe('CircuitDiagram', () => {
     expect(screen.getAllByText('7.96 mH').length).toBeGreaterThanOrEqual(1)
     // C1 = 3.18e-7 F → 318 nF
     expect(screen.getAllByText('318 nF').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders Sallen-Key SVG with op-amp components', () => {
+    render(
+      <CircuitDiagram
+        components={SALLEN_KEY_COMPONENTS}
+        topology="sallen-key"
+      />,
+    )
+    expect(screen.getByTestId('circuit-diagram')).toBeInTheDocument()
+    const svg = screen.getByRole('img', { name: 'Sallen-Key circuit diagram' })
+    expect(svg).toBeInTheDocument()
+    // Should display component labels (stage prefix stripped)
+    expect(screen.getByText('R1')).toBeInTheDocument()
+    expect(screen.getByText('R2')).toBeInTheDocument()
+    expect(screen.getByText('U')).toBeInTheDocument()
+    // Should display stage label
+    expect(screen.getByText('Stage 1')).toBeInTheDocument()
+    // Should display Vin/Vout labels
+    expect(screen.getByText('Vin')).toBeInTheDocument()
+    expect(screen.getByText('Vout')).toBeInTheDocument()
   })
 })

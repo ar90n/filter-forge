@@ -21,15 +21,17 @@ from typing import TypedDict, Literal, Required
 # Introspected by scripts/gen_bridge.py to generate TypeScript types.
 # =============================================================================
 
-FilterType = Literal['lpf', 'hpf', 'bpf', 'bef', 'apf']
+Characteristics = Literal['lpf', 'hpf', 'bpf', 'bef', 'apf']
+FilterType = Literal['lc_passive', 'active_sallen_key']
 Approximation = Literal['butterworth', 'chebyshev1', 'chebyshev2', 'bessel', 'elliptic']
-ComponentType = Literal['resistor', 'capacitor', 'inductor']
-ComponentPosition = Literal['series', 'shunt']
-CircuitTopology = Literal['ladder-t', 'ladder-pi', 'lattice']
+ComponentType = Literal['resistor', 'capacitor', 'inductor', 'opamp']
+ComponentPosition = Literal['series', 'shunt', 'active']
+CircuitTopology = Literal['ladder-t', 'ladder-pi', 'lattice', 'sallen-key']
 
 
 class FilterParams(TypedDict, total=False):
     filterType: Required[FilterType]
+    characteristics: Required[Characteristics]
     approximation: Required[Approximation]
     order: Required[int]
     cutoffFrequency: Required[float]
@@ -37,8 +39,9 @@ class FilterParams(TypedDict, total=False):
     bandwidth: float
     passbandRipple: float
     stopbandAttenuation: float
-    sourceImpedance: Required[float]
-    loadImpedance: Required[float]
+    sourceImpedance: float
+    loadImpedance: float
+    gain: float
 
 
 class TransferFunction(TypedDict):
@@ -645,7 +648,8 @@ def design_filter(params: FilterParams) -> FilterResult:
 
     Parameters:
         params: dict with keys:
-            - filterType: 'lpf' | 'hpf' | 'bpf' | 'bef' | 'apf'
+            - filterType: 'lc_passive' | 'active_sallen_key'
+            - characteristics: 'lpf' | 'hpf' | 'bpf' | 'bef' | 'apf'
             - approximation: 'butterworth' | 'chebyshev1' | 'chebyshev2' | 'bessel' | 'elliptic'
             - order: int (1-10)
             - cutoffFrequency: float [Hz] (LPF/HPF)
@@ -653,14 +657,16 @@ def design_filter(params: FilterParams) -> FilterResult:
             - bandwidth: float [Hz] (BPF/BEF)
             - passbandRipple: float [dB] (Chebyshev I, Elliptic)
             - stopbandAttenuation: float [dB] (Chebyshev II, Elliptic)
-            - sourceImpedance: float [Ohm]
-            - loadImpedance: float [Ohm]
+            - sourceImpedance: float [Ohm] (LC Passive only)
+            - loadImpedance: float [Ohm] (LC Passive only)
+            - gain: float (Sallen-Key, default 1.0)
 
     Returns:
         dict: FilterResult
     """
     try:
-        filter_type = params.get("filterType", "lpf")
+        filter_type = params.get("filterType", "lc_passive")
+        characteristics = params.get("characteristics", "lpf")
         approximation = params.get("approximation", "butterworth")
         order = int(params.get("order", 3))
         cutoff_freq = float(params.get("cutoffFrequency", 0))
@@ -668,13 +674,24 @@ def design_filter(params: FilterParams) -> FilterResult:
         bandwidth = float(params.get("bandwidth", 0))
         ripple_db = params.get("passbandRipple")
         attenuation_db = params.get("stopbandAttenuation")
-        source_impedance = float(params.get("sourceImpedance", 50.0))
-        load_impedance = float(params.get("loadImpedance", 50.0))
 
         if ripple_db is not None:
             ripple_db = float(ripple_db)
         if attenuation_db is not None:
             attenuation_db = float(attenuation_db)
+
+        # --- Dispatch by filter type ---
+        if filter_type == "active_sallen_key":
+            return design_sallen_key_filter(
+                characteristics, approximation, order,
+                cutoff_freq, center_freq, bandwidth,
+                ripple_db, attenuation_db,
+                gain=float(params.get("gain", 1.0)),
+            )
+
+        # --- LC Passive filter ---
+        source_impedance = float(params.get("sourceImpedance", 50.0))
+        load_impedance = float(params.get("loadImpedance", 50.0))
 
         # --- Validation ---
         if order < 1 or order > 10:
@@ -683,36 +700,36 @@ def design_filter(params: FilterParams) -> FilterResult:
         if source_impedance <= 0 or load_impedance <= 0:
             return _error("INVALID_PARAMS", "Impedance must be positive.")
 
-        if filter_type in ("lpf", "hpf"):
+        if characteristics in ("lpf", "hpf"):
             if cutoff_freq <= 0:
                 return _error("INVALID_PARAMS", "Cutoff frequency must be positive.")
-        elif filter_type in ("bpf", "bef"):
+        elif characteristics in ("bpf", "bef"):
             if center_freq <= 0:
                 return _error("INVALID_PARAMS", "Center frequency must be positive.")
             if bandwidth <= 0:
                 return _error("INVALID_PARAMS", "Bandwidth must be positive.")
-        elif filter_type == "apf":
+        elif characteristics == "apf":
             if center_freq <= 0:
                 return _error("INVALID_PARAMS", "Center frequency must be positive.")
         else:
-            return _error("INVALID_PARAMS", f"Unknown filter type: {filter_type}")
+            return _error("INVALID_PARAMS", f"Unknown characteristics: {characteristics}")
 
         valid_approximations = ["butterworth", "chebyshev1", "chebyshev2", "bessel", "elliptic"]
-        if filter_type != "apf" and approximation not in valid_approximations:
+        if characteristics != "apf" and approximation not in valid_approximations:
             return _error("INVALID_PARAMS", f"Unknown approximation: {approximation}")
 
-        if approximation in ("chebyshev1", "elliptic") and filter_type != "apf":
+        if approximation in ("chebyshev1", "elliptic") and characteristics != "apf":
             if ripple_db is None or ripple_db <= 0:
                 return _error("INVALID_PARAMS", "Passband ripple must be positive.")
 
-        if approximation in ("chebyshev2", "elliptic") and filter_type != "apf":
+        if approximation in ("chebyshev2", "elliptic") and characteristics != "apf":
             if attenuation_db is None or attenuation_db <= 0:
                 return _error("INVALID_PARAMS", "Stopband attenuation must be positive.")
 
         impedance = source_impedance
 
         # --- APF: special handling ---
-        if filter_type == "apf":
+        if characteristics == "apf":
             b, a = design_apf_transfer_function(order, center_freq)
             freq_resp = compute_frequency_response(b, a, "apf",
                                                     center_freq=center_freq)
@@ -731,10 +748,10 @@ def design_filter(params: FilterParams) -> FilterResult:
             }
 
         # --- LPF/HPF/BPF/BEF ---
-        btype = BTYPE_MAP[filter_type]
+        btype = BTYPE_MAP[characteristics]
 
         # Compute Wn
-        if filter_type in ("lpf", "hpf"):
+        if characteristics in ("lpf", "hpf"):
             Wn = 2.0 * math.pi * cutoff_freq
         else:  # bpf, bef
             f_low = center_freq - bandwidth / 2.0
@@ -751,7 +768,7 @@ def design_filter(params: FilterParams) -> FilterResult:
 
         # Frequency response
         freq_resp = compute_frequency_response(
-            b, a, filter_type,
+            b, a, characteristics,
             cutoff_freq=cutoff_freq,
             center_freq=center_freq,
             bandwidth=bandwidth
@@ -764,19 +781,19 @@ def design_filter(params: FilterParams) -> FilterResult:
             attenuation_db=attenuation_db
         )
 
-        if filter_type == "lpf":
+        if characteristics == "lpf":
             components, topology = scale_lpf_components(
                 g_values, order, cutoff_freq, impedance
             )
-        elif filter_type == "hpf":
+        elif characteristics == "hpf":
             components, topology = scale_hpf_components(
                 g_values, order, cutoff_freq, impedance
             )
-        elif filter_type == "bpf":
+        elif characteristics == "bpf":
             components, topology = scale_bpf_components(
                 g_values, order, center_freq, bandwidth, impedance
             )
-        elif filter_type == "bef":
+        elif characteristics == "bef":
             components, topology = scale_bef_components(
                 g_values, order, center_freq, bandwidth, impedance
             )
@@ -802,6 +819,223 @@ def design_filter(params: FilterParams) -> FilterResult:
                 "details": repr(e),
             }
         }
+
+
+# =============================================================================
+# Sallen-Key active filter design
+# =============================================================================
+
+SALLEN_KEY_SUPPORTED = ("lpf", "hpf", "bpf")
+DEFAULT_R_REF = 10000.0  # 10 kΩ reference resistance
+
+
+def design_sallen_key_lpf_stage(w0, Q, R_ref):
+    """
+    Design a single Sallen-Key LPF 2nd-order stage (equal-R topology).
+
+    Unity-gain Sallen-Key LPF:
+        In ──[R1]──┬──[R2]──┬──[OpAmp]── Out
+                   │        │    │
+                  [C1]     [C2]──┘ (feedback)
+                   │
+                  GND
+
+    Equal-R design: R1 = R2 = R_ref
+        C1 = 2Q / (w0 * R)
+        C2 = 1 / (2Q * w0 * R)
+    """
+    R = R_ref
+    C1 = 2.0 * Q / (w0 * R)
+    C2 = 1.0 / (2.0 * Q * w0 * R)
+    return R, R, C1, C2
+
+
+def design_sallen_key_hpf_stage(w0, Q, R_ref):
+    """
+    Design a single Sallen-Key HPF 2nd-order stage (equal-C topology).
+
+    Unity-gain Sallen-Key HPF:
+        In ──[C1]──┬──[C2]──┬──[OpAmp]── Out
+                   │        │    │
+                  [R1]     [R2]──┘ (feedback)
+                   │
+                  GND
+
+    Equal-C design: C1 = C2 = C_ref = 1 / (w0 * R_ref)
+        R1 = 1 / (2Q * w0 * C)
+        R2 = 2Q / (w0 * C)
+    """
+    C = 1.0 / (w0 * R_ref)
+    R1 = 1.0 / (2.0 * Q * w0 * C)
+    R2 = 2.0 * Q / (w0 * C)
+    return R1, R2, C, C
+
+
+def design_sallen_key_bpf_stage(w0, Q, R_ref):
+    """
+    Design a single Multiple Feedback (MFB) BPF 2nd-order stage.
+
+    MFB BPF topology (commonly paired with Sallen-Key for bandpass):
+        In ──[R1]──┬──[C1]──┬──[OpAmp(-)]── Out
+                   │        │       │
+                  [R2]     [C2]─────┘ (feedback)
+                   │
+                  GND
+
+    Design equations (unity gain at center frequency):
+        C1 = C2 = C = 1 / (w0 * R_ref)
+        R1 = Q / (w0 * C)
+        R2 = Q / (2 * Q^2 - 1) / (w0 * C)  (for gain = 1 at center)
+        R3 = 2 * Q / (w0 * C)
+    """
+    C = 1.0 / (w0 * R_ref)
+    R1 = Q / (w0 * C)
+    denom = 2.0 * Q * Q
+    if denom < 1.0:
+        denom = 1.0  # Prevent negative or zero R2 for low Q
+    R2 = Q / (denom * w0 * C)
+    R3 = 2.0 * Q / (w0 * C)
+    return R1, R2, R3, C, C
+
+
+def design_sallen_key_filter(characteristics, approximation, order,
+                              cutoff_freq, center_freq, bandwidth,
+                              ripple_db, attenuation_db, gain=1.0):
+    """
+    Design an active Sallen-Key filter by cascading 2nd-order sections.
+
+    Constraints:
+      - Even order only (2, 4, 6, 8, 10)
+      - Characteristics: LPF, HPF, or BPF
+    """
+    # --- Validation ---
+    if characteristics not in SALLEN_KEY_SUPPORTED:
+        return _error("INVALID_PARAMS",
+                       f"Sallen-Key does not support '{characteristics}'. Use LPF, HPF, or BPF.")
+
+    if order < 2 or order > 10:
+        return _error("INVALID_PARAMS", "Filter order must be between 2 and 10.")
+
+    if order % 2 != 0:
+        return _error("INVALID_PARAMS", "Sallen-Key requires an even order (2, 4, 6, 8, 10).")
+
+    valid_approximations = ["butterworth", "chebyshev1", "chebyshev2", "bessel", "elliptic"]
+    if approximation not in valid_approximations:
+        return _error("INVALID_PARAMS", f"Unknown approximation: {approximation}")
+
+    if characteristics in ("lpf", "hpf"):
+        if cutoff_freq <= 0:
+            return _error("INVALID_PARAMS", "Cutoff frequency must be positive.")
+    elif characteristics == "bpf":
+        if center_freq <= 0:
+            return _error("INVALID_PARAMS", "Center frequency must be positive.")
+        if bandwidth <= 0:
+            return _error("INVALID_PARAMS", "Bandwidth must be positive.")
+
+    if approximation in ("chebyshev1", "elliptic"):
+        if ripple_db is None or ripple_db <= 0:
+            return _error("INVALID_PARAMS", "Passband ripple must be positive.")
+
+    if approximation in ("chebyshev2", "elliptic"):
+        if attenuation_db is None or attenuation_db <= 0:
+            return _error("INVALID_PARAMS", "Stopband attenuation must be positive.")
+
+    # --- Compute transfer function ---
+    btype = BTYPE_MAP[characteristics]
+
+    if characteristics in ("lpf", "hpf"):
+        Wn = 2.0 * math.pi * cutoff_freq
+    else:  # bpf
+        f_low = center_freq - bandwidth / 2.0
+        f_high = center_freq + bandwidth / 2.0
+        if f_low <= 0:
+            f_low = 1.0
+        Wn = [2.0 * math.pi * f_low, 2.0 * math.pi * f_high]
+
+    b, a = get_transfer_function(
+        approximation, order, Wn, btype,
+        rp=ripple_db, rs=attenuation_db
+    )
+
+    # --- Frequency response ---
+    freq_resp = compute_frequency_response(
+        b, a, characteristics,
+        cutoff_freq=cutoff_freq,
+        center_freq=center_freq,
+        bandwidth=bandwidth
+    )
+
+    # --- Decompose into 2nd-order sections ---
+    z, p, k = signal.tf2zpk(b, a)
+    sos = signal.zpk2sos(z, p, k, pairing='nearest')
+
+    # --- Design component values for each stage ---
+    components = []
+    num_stages = len(sos)
+
+    for stage_idx in range(num_stages):
+        stage_num = stage_idx + 1
+        # Each SOS row: [b0, b1, b2, a0, a1, a2]
+        # For analog: a0*s^2 + a1*s + a2  (but SOS from zpk2sos is digital-style)
+        # We need w0 and Q from the denominator polynomial of each section
+        sos_row = sos[stage_idx]
+        a0_s, a1_s, a2_s = sos_row[3], sos_row[4], sos_row[5]
+
+        # w0 = sqrt(a2/a0), Q = sqrt(a0*a2) / a1
+        if a0_s == 0 or a2_s == 0:
+            # Degenerate section, skip
+            continue
+
+        w0 = math.sqrt(abs(a2_s / a0_s))
+        if a1_s == 0:
+            Q = 100.0  # Very high Q (near-oscillatory)
+        else:
+            Q = math.sqrt(abs(a0_s * a2_s)) / abs(a1_s)
+
+        Q = max(Q, 0.1)  # Clamp minimum Q
+        Q = min(Q, 100.0)  # Clamp maximum Q
+
+        if characteristics == "lpf":
+            R1, R2, C1, C2 = design_sallen_key_lpf_stage(w0, Q, DEFAULT_R_REF)
+            components.extend([
+                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "series"},
+                {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "series"},
+                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "shunt"},
+                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "shunt"},
+                {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
+            ])
+        elif characteristics == "hpf":
+            R1, R2, C1, C2 = design_sallen_key_hpf_stage(w0, Q, DEFAULT_R_REF)
+            components.extend([
+                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "series"},
+                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "series"},
+                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "shunt"},
+                {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
+                {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
+            ])
+        elif characteristics == "bpf":
+            R1, R2, R3, C1, C2 = design_sallen_key_bpf_stage(w0, Q, DEFAULT_R_REF)
+            components.extend([
+                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "series"},
+                {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
+                {"id": f"S{stage_num}_R3", "type": "resistor", "value": float(R3), "position": "series"},
+                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "series"},
+                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "shunt"},
+                {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
+            ])
+
+    latex = format_transfer_function_latex(b, a)
+
+    return {
+        "transferFunction": {
+            "numerator": b.tolist(),
+            "denominator": a.tolist(),
+        },
+        "transferFunctionLatex": latex,
+        "frequencyResponse": freq_resp,
+        "components": components,
+        "circuitTopology": "sallen-key",
+    }
 
 
 def _error(code, message):
