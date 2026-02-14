@@ -22,7 +22,7 @@ const ALL_CHARACTERISTICS: { value: Characteristics; label: string }[] = [
   { value: 'apf', label: 'All-Pass Filter (APF)' },
 ]
 
-const SALLEN_KEY_CHARACTERISTICS: Characteristics[] = ['lpf', 'hpf', 'bpf']
+const SALLEN_KEY_CHARACTERISTICS: Characteristics[] = ['lpf', 'hpf']
 
 const APPROXIMATIONS: { value: Approximation; label: string }[] = [
   { value: 'butterworth', label: 'Butterworth' },

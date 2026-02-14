@@ -132,7 +132,7 @@ describe('FilterForm', () => {
 
   // --- Sallen-Key specific tests ---
 
-  it('shows only LPF/HPF/BPF characteristics for Sallen-Key', async () => {
+  it('shows only LPF/HPF characteristics for Sallen-Key', async () => {
     const user = userEvent.setup()
     render(<FilterForm onSubmit={mockSubmit} />)
 
@@ -142,7 +142,8 @@ describe('FilterForm', () => {
     const options = Array.from(charSelect.querySelectorAll('option')).map(
       (opt) => (opt as HTMLOptionElement).value,
     )
-    expect(options).toEqual(['lpf', 'hpf', 'bpf'])
+    expect(options).toEqual(['lpf', 'hpf'])
+    expect(options).not.toContain('bpf')
     expect(options).not.toContain('bef')
     expect(options).not.toContain('apf')
   })

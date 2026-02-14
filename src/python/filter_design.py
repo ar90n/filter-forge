@@ -825,7 +825,7 @@ def design_filter(params: FilterParams) -> FilterResult:
 # Sallen-Key active filter design
 # =============================================================================
 
-SALLEN_KEY_SUPPORTED = ("lpf", "hpf", "bpf")
+SALLEN_KEY_SUPPORTED = ("lpf", "hpf")
 DEFAULT_R_REF = 10000.0  # 10 kΩ reference resistance
 
 
@@ -875,33 +875,6 @@ def design_sallen_key_hpf_stage(w0, Q, R_ref):
     return R1, R2, C, C
 
 
-def design_sallen_key_bpf_stage(w0, Q, R_ref):
-    """
-    Design a single Multiple Feedback (MFB) BPF 2nd-order stage.
-
-    MFB BPF topology (commonly paired with Sallen-Key for bandpass):
-        In ──[R1]──┬──[C1]──┬──[OpAmp(-)]── Out
-                   │        │       │
-                  [R2]     [C2]─────┘ (feedback)
-                   │
-                  GND
-
-    Design equations (unity gain at center frequency):
-        C1 = C2 = C = 1 / (w0 * R_ref)
-        R1 = Q / (w0 * C)
-        R2 = Q / (2 * Q^2 - 1) / (w0 * C)  (for gain = 1 at center)
-        R3 = 2 * Q / (w0 * C)
-    """
-    C = 1.0 / (w0 * R_ref)
-    R1 = Q / (w0 * C)
-    denom = 2.0 * Q * Q
-    if denom < 1.0:
-        denom = 1.0  # Prevent negative or zero R2 for low Q
-    R2 = Q / (denom * w0 * C)
-    R3 = 2.0 * Q / (w0 * C)
-    return R1, R2, R3, C, C
-
-
 def design_sallen_key_filter(characteristics, approximation, order,
                               cutoff_freq, center_freq, bandwidth,
                               ripple_db, attenuation_db, gain=1.0):
@@ -910,12 +883,12 @@ def design_sallen_key_filter(characteristics, approximation, order,
 
     Constraints:
       - Even order only (2, 4, 6, 8, 10)
-      - Characteristics: LPF, HPF, or BPF
+      - Characteristics: LPF or HPF
     """
     # --- Validation ---
     if characteristics not in SALLEN_KEY_SUPPORTED:
         return _error("INVALID_PARAMS",
-                       f"Sallen-Key does not support '{characteristics}'. Use LPF, HPF, or BPF.")
+                       f"Sallen-Key does not support '{characteristics}'. Use LPF or HPF.")
 
     if order < 2 or order > 10:
         return _error("INVALID_PARAMS", "Filter order must be between 2 and 10.")
@@ -927,14 +900,8 @@ def design_sallen_key_filter(characteristics, approximation, order,
     if approximation not in valid_approximations:
         return _error("INVALID_PARAMS", f"Unknown approximation: {approximation}")
 
-    if characteristics in ("lpf", "hpf"):
-        if cutoff_freq <= 0:
-            return _error("INVALID_PARAMS", "Cutoff frequency must be positive.")
-    elif characteristics == "bpf":
-        if center_freq <= 0:
-            return _error("INVALID_PARAMS", "Center frequency must be positive.")
-        if bandwidth <= 0:
-            return _error("INVALID_PARAMS", "Bandwidth must be positive.")
+    if cutoff_freq <= 0:
+        return _error("INVALID_PARAMS", "Cutoff frequency must be positive.")
 
     if approximation in ("chebyshev1", "elliptic"):
         if ripple_db is None or ripple_db <= 0:
@@ -947,14 +914,7 @@ def design_sallen_key_filter(characteristics, approximation, order,
     # --- Compute transfer function ---
     btype = BTYPE_MAP[characteristics]
 
-    if characteristics in ("lpf", "hpf"):
-        Wn = 2.0 * math.pi * cutoff_freq
-    else:  # bpf
-        f_low = center_freq - bandwidth / 2.0
-        f_high = center_freq + bandwidth / 2.0
-        if f_low <= 0:
-            f_low = 1.0
-        Wn = [2.0 * math.pi * f_low, 2.0 * math.pi * f_high]
+    Wn = 2.0 * math.pi * cutoff_freq
 
     b, a = get_transfer_function(
         approximation, order, Wn, btype,
@@ -1015,16 +975,6 @@ def design_sallen_key_filter(characteristics, approximation, order,
                 {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "series"},
                 {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "feedback"},
                 {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
-                {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
-            ])
-        elif characteristics == "bpf":
-            R1, R2, R3, C1, C2 = design_sallen_key_bpf_stage(w0, Q, DEFAULT_R_REF)
-            components.extend([
-                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "series"},
-                {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
-                {"id": f"S{stage_num}_R3", "type": "resistor", "value": float(R3), "position": "series"},
-                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "series"},
-                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "feedback"},
                 {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
             ])
 
