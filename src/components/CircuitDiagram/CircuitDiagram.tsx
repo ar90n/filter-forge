@@ -839,16 +839,19 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
   const stageGap = 40
   const marginL = 40
   const marginR = 40
-  const topPad = 20
-  const mainLineY = 60
-  const gndY = 190
+  const topPad = 14
+  const mainLineY = 100
+  const gndY = 220
   const opAmpX = 230
-  const opAmpY = mainLineY - 10
+  // Align op-amp + input with main line: + pin is at relative y=10
+  const opAmpY = mainLineY + WIRE_CENTER_Y - 10
 
-  // Feedback path: below main line, junction1 → output
-  const fbPathY = mainLineY + WIRE_CENTER_Y + 48
-  // Unity-gain inverting feedback: below feedback path
-  const invFbY = mainLineY + WIRE_CENTER_Y + 92
+  // Feedback path: ABOVE main line, junction1 → output
+  // Needs clearance above series component labels (mainLineY - 14 for name, mainLineY - 2 for value)
+  // and below stage label. Place feedback center line 40px above mainLineY.
+  const fbPathY = mainLineY - 40
+  // Unity-gain inverting feedback: below op-amp − pin
+  const invFbY = mainLineY + WIRE_CENTER_Y + 50
 
   const totalWidth = marginL + stages.length * (stageW + stageGap) - stageGap + marginR
   const totalHeight = gndY + 30
@@ -869,7 +872,7 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
       />
 
       {/* Vin label */}
-      <text x={marginL - 8} y={mainLineY - 16} fontSize="9" fill="#374151" fontWeight="bold">Vin</text>
+      <text x={marginL - 30} y={mainLineY + WIRE_CENTER_Y + 4} fontSize="9" fill="#374151" fontWeight="bold" fontStyle="italic">Vin</text>
 
       {stages.map((stage, stageIdx) => {
         const stageX = marginL + stageIdx * (stageW + stageGap)
@@ -964,33 +967,42 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
             )}
 
             {/* Feedback component (C1 for LPF / R1 for HPF): junction1 → op-amp output */}
-            {fbComp && (
-              <g>
-                {/* Wire down from junction1 to feedback path level */}
-                <line x1={junctionX} y1={lineY} x2={junctionX} y2={fbPathY}
-                  stroke="currentColor" strokeWidth="1.5" />
-                {/* Horizontal feedback component */}
-                <SeriesGlyph type={fbComp.type} x={junctionX} y={fbPathY - WIRE_CENTER_Y} />
-                {/* Wire from component end to op-amp output X */}
-                <line x1={junctionX + SERIES_W} y1={fbPathY} x2={opOutX} y2={fbPathY}
-                  stroke="currentColor" strokeWidth="1.5" />
-                {/* Wire up to op-amp output */}
-                <line x1={opOutX} y1={fbPathY} x2={opOutX} y2={opOutY}
-                  stroke="currentColor" strokeWidth="1.5" />
-                {/* Label below the feedback component */}
-                <text x={junctionX + SERIES_W / 2} y={fbPathY + 16}
-                  textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
-                  {fbComp.id.replace(/^S\d+_/, '')}
-                </text>
-                <text x={junctionX + SERIES_W / 2} y={fbPathY + 28}
-                  textAnchor="middle" fontSize="8" fill="#6b7280">
-                  {formatComponentValue(fbComp)}
-                </text>
-              </g>
-            )}
+            {fbComp && (() => {
+              // Route feedback: junction1 → up → [component] → horizontal past op-amp → down to output
+              const fbEndX = opOutX + 8 // Route past the op-amp tip to avoid overlap
+              return (
+                <g>
+                  {/* Wire up from junction1 to feedback path level */}
+                  <line x1={junctionX} y1={lineY} x2={junctionX} y2={fbPathY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  {/* Horizontal feedback component */}
+                  <SeriesGlyph type={fbComp.type} x={junctionX} y={fbPathY - WIRE_CENTER_Y} />
+                  {/* Wire from component end → horizontally past op-amp */}
+                  <line x1={junctionX + SERIES_W} y1={fbPathY} x2={fbEndX} y2={fbPathY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  {/* Wire down from feedback path to op-amp output level */}
+                  <line x1={fbEndX} y1={fbPathY} x2={fbEndX} y2={opOutY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  {/* Short horizontal wire back to op-amp output point */}
+                  <line x1={fbEndX} y1={opOutY} x2={opOutX} y2={opOutY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  {/* Junction dot at op-amp output connection */}
+                  <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
+                  {/* Label above the feedback component */}
+                  <text x={junctionX + SERIES_W / 2} y={fbPathY - WIRE_CENTER_Y - 12}
+                    textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
+                    {fbComp.id.replace(/^S\d+_/, '')}
+                  </text>
+                  <text x={junctionX + SERIES_W / 2} y={fbPathY - WIRE_CENTER_Y - 1}
+                    textAnchor="middle" fontSize="8" fill="#6b7280">
+                    {formatComponentValue(fbComp)}
+                  </text>
+                </g>
+              )
+            })()}
 
-            {/* Wire from junction2 to op-amp non-inverting input (+) */}
-            <line x1={junction2X} y1={lineY} x2={stageX + opAmpX} y2={opAmpY + 10}
+            {/* Wire from junction2 to op-amp non-inverting input (+) — horizontal, aligned */}
+            <line x1={junction2X} y1={lineY} x2={stageX + opAmpX} y2={lineY}
               stroke="currentColor" strokeWidth="1.5" />
 
             {/* Op-amp inverting input (−) → connected to output (unity gain) */}
@@ -998,16 +1010,26 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
               const invPinX = stageX + opAmpX
               const invPinY = opAmpY + 30
               const invWireX = invPinX - 10
+              const invEndX = opOutX + 16 // Route past op-amp to avoid overlapping triangle
               return (
                 <>
+                  {/* Wire left from − pin */}
                   <line x1={invPinX} y1={invPinY} x2={invWireX} y2={invPinY}
                     stroke="currentColor" strokeWidth="1.5" />
+                  {/* Wire down to inverting feedback level */}
                   <line x1={invWireX} y1={invPinY} x2={invWireX} y2={invFbY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  <line x1={invWireX} y1={invFbY} x2={opOutX} y2={invFbY}
+                  {/* Wire right to past op-amp */}
+                  <line x1={invWireX} y1={invFbY} x2={invEndX} y2={invFbY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  <line x1={opOutX} y1={invFbY} x2={opOutX} y2={opOutY}
+                  {/* Wire up to output level */}
+                  <line x1={invEndX} y1={invFbY} x2={invEndX} y2={opOutY}
                     stroke="currentColor" strokeWidth="1.5" />
+                  {/* Wire left back to output point */}
+                  <line x1={invEndX} y1={opOutY} x2={opOutX} y2={opOutY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  {/* Junction dot at output */}
+                  <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
                 </>
               )
             })()}
@@ -1027,7 +1049,6 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
             <line x1={opOutX} y1={opOutY}
               x2={stageX + stageW} y2={opOutY}
               stroke="currentColor" strokeWidth="1.5" />
-            <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
 
             {/* Inter-stage wire */}
             {stageIdx < stages.length - 1 && (
@@ -1042,9 +1063,9 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
       {/* Vout label */}
       {stages.length > 0 && (
         <text
-          x={marginL + stages.length * (stageW + stageGap) - stageGap - 8}
-          y={mainLineY + WIRE_CENTER_Y - 16}
-          fontSize="9" fill="#374151" fontWeight="bold"
+          x={marginL + stages.length * (stageW + stageGap) - stageGap + 4}
+          y={mainLineY + WIRE_CENTER_Y + 4}
+          fontSize="9" fill="#374151" fontWeight="bold" fontStyle="italic"
         >
           Vout
         </text>
