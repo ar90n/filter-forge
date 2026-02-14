@@ -986,8 +986,8 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
                   {/* Short horizontal wire back to op-amp output point */}
                   <line x1={fbEndX} y1={opOutY} x2={opOutX} y2={opOutY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  {/* Junction dot at op-amp output connection */}
-                  <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
+                  {/* Bifurcation dot where feedback branches from Vout wire */}
+                  <circle cx={fbEndX} cy={opOutY} r="2.5" fill="currentColor" />
                   {/* Label above the feedback component */}
                   <text x={junctionX + SERIES_W / 2} y={fbPathY - WIRE_CENTER_Y - 12}
                     textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
@@ -1028,8 +1028,8 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
                   {/* Wire left back to output point */}
                   <line x1={invEndX} y1={opOutY} x2={opOutX} y2={opOutY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  {/* Junction dot at output */}
-                  <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
+                  {/* Bifurcation dot where inverting feedback branches from Vout wire */}
+                  <circle cx={invEndX} cy={opOutY} r="2.5" fill="currentColor" />
                 </>
               )
             })()}
