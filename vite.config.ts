@@ -5,7 +5,7 @@ import { resolve } from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/filter_forge/',
+  base: '/filter-forge/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
