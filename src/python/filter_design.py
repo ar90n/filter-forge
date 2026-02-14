@@ -25,7 +25,7 @@ Characteristics = Literal['lpf', 'hpf', 'bpf', 'bef', 'apf']
 FilterType = Literal['lc_passive', 'active_sallen_key']
 Approximation = Literal['butterworth', 'chebyshev1', 'chebyshev2', 'bessel', 'elliptic']
 ComponentType = Literal['resistor', 'capacitor', 'inductor', 'opamp']
-ComponentPosition = Literal['series', 'shunt', 'active']
+ComponentPosition = Literal['series', 'shunt', 'feedback', 'active']
 CircuitTopology = Literal['ladder-t', 'ladder-pi', 'lattice', 'sallen-key']
 
 
@@ -833,16 +833,18 @@ def design_sallen_key_lpf_stage(w0, Q, R_ref):
     """
     Design a single Sallen-Key LPF 2nd-order stage (equal-R topology).
 
-    Unity-gain Sallen-Key LPF:
-        In ──[R1]──┬──[R2]──┬──[OpAmp]── Out
-                   │        │    │
-                  [C1]     [C2]──┘ (feedback)
-                   │
-                  GND
+    Unity-gain Sallen-Key LPF (Wikipedia convention):
+        In ──[R1]──┬──[R2]──┬──(+)OpAmp── Out
+                   │        │              │
+                   └──[C1]─────────────────┘  (C1 = feedback: junction1 → output)
+                            │
+                           [C2]               (C2 = ground:   junction2 → GND)
+                            │
+                           GND
 
     Equal-R design: R1 = R2 = R_ref
-        C1 = 2Q / (w0 * R)
-        C2 = 1 / (2Q * w0 * R)
+        C1 = 2Q / (w0 * R)   (feedback capacitor, larger value)
+        C2 = 1 / (2Q * w0 * R)  (grounded capacitor, smaller value)
     """
     R = R_ref
     C1 = 2.0 * Q / (w0 * R)
@@ -854,16 +856,18 @@ def design_sallen_key_hpf_stage(w0, Q, R_ref):
     """
     Design a single Sallen-Key HPF 2nd-order stage (equal-C topology).
 
-    Unity-gain Sallen-Key HPF:
-        In ──[C1]──┬──[C2]──┬──[OpAmp]── Out
-                   │        │    │
-                  [R1]     [R2]──┘ (feedback)
-                   │
-                  GND
+    Unity-gain Sallen-Key HPF (Wikipedia convention):
+        In ──[C1]──┬──[C2]──┬──(+)OpAmp── Out
+                   │        │              │
+                   └──[R1]─────────────────┘  (R1 = feedback: junction1 → output)
+                            │
+                           [R2]               (R2 = ground:   junction2 → GND)
+                            │
+                           GND
 
     Equal-C design: C1 = C2 = C_ref = 1 / (w0 * R_ref)
-        R1 = 1 / (2Q * w0 * C)
-        R2 = 2Q / (w0 * C)
+        R1 = 1 / (2Q * w0 * C)  (feedback resistor)
+        R2 = 2Q / (w0 * C)      (grounded resistor)
     """
     C = 1.0 / (w0 * R_ref)
     R1 = 1.0 / (2.0 * Q * w0 * C)
@@ -1000,7 +1004,7 @@ def design_sallen_key_filter(characteristics, approximation, order,
             components.extend([
                 {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "series"},
                 {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "series"},
-                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "shunt"},
+                {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "feedback"},
                 {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "shunt"},
                 {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
             ])
@@ -1009,7 +1013,7 @@ def design_sallen_key_filter(characteristics, approximation, order,
             components.extend([
                 {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "series"},
                 {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "series"},
-                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "shunt"},
+                {"id": f"S{stage_num}_R1", "type": "resistor", "value": float(R1), "position": "feedback"},
                 {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
                 {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
             ])
@@ -1020,7 +1024,7 @@ def design_sallen_key_filter(characteristics, approximation, order,
                 {"id": f"S{stage_num}_R2", "type": "resistor", "value": float(R2), "position": "shunt"},
                 {"id": f"S{stage_num}_R3", "type": "resistor", "value": float(R3), "position": "series"},
                 {"id": f"S{stage_num}_C1", "type": "capacitor", "value": float(C1), "position": "series"},
-                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "shunt"},
+                {"id": f"S{stage_num}_C2", "type": "capacitor", "value": float(C2), "position": "feedback"},
                 {"id": f"S{stage_num}_U", "type": "opamp", "value": 0, "position": "active"},
             ])
 

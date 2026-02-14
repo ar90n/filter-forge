@@ -38,6 +38,8 @@ function formatPosition(position: Component['position']): string {
       return 'Series'
     case 'shunt':
       return 'Shunt'
+    case 'feedback':
+      return 'Feedback'
     case 'active':
       return 'Active'
   }

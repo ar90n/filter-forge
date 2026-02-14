@@ -811,16 +811,44 @@ function parseSallenKeyStages(components: Component[]): SallenKeyStage[] {
 function SallenKeyLayout({ components }: { components: Component[] }) {
   const stages = parseSallenKeyStages(components)
 
-  // Layout constants for Sallen-Key
-  const stageW = 320
+  // Correct Sallen-Key LPF topology (per Wikipedia):
+  //
+  //   In ──[R1]──┬──[R2]──┬──(+)OpAmp── Out
+  //              │        │              │
+  //              └──[C1]─────────────────┘  C1 = feedback: junction1 → output
+  //                       │
+  //                      [C2]               C2 = shunt: junction2 → GND
+  //                       │
+  //                      GND
+  //
+  // HPF swaps R↔C roles:
+  //   In ──[C1]──┬──[C2]──┬──(+)OpAmp── Out
+  //              │        │              │
+  //              └──[R1]─────────────────┘  R1 = feedback: junction1 → output
+  //                       │
+  //                      [R2]               R2 = shunt: junction2 → GND
+  //                       │
+  //                      GND
+  //
+  // Component positions from Python:
+  //   series   = main signal path (R1, R2 for LPF; C1, C2 for HPF)
+  //   feedback = junction1 → op-amp output (C1 for LPF; R1 for HPF)
+  //   shunt    = junction2 → GND (C2 for LPF; R2 for HPF)
+
+  const stageW = 340
   const stageGap = 40
   const marginL = 40
   const marginR = 40
   const topPad = 20
   const mainLineY = 60
-  const gndY = 170
-  const opAmpX = 220 // X offset of op-amp within stage
-  const opAmpY = mainLineY - 10 // Y position to align non-inv input with main line
+  const gndY = 190
+  const opAmpX = 230
+  const opAmpY = mainLineY - 10
+
+  // Feedback path: below main line, junction1 → output
+  const fbPathY = mainLineY + WIRE_CENTER_Y + 48
+  // Unity-gain inverting feedback: below feedback path
+  const invFbY = mainLineY + WIRE_CENTER_Y + 92
 
   const totalWidth = marginL + stages.length * (stageW + stageGap) - stageGap + marginR
   const totalHeight = gndY + 30
@@ -846,20 +874,19 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
       {stages.map((stage, stageIdx) => {
         const stageX = marginL + stageIdx * (stageW + stageGap)
         const passives = stage.passiveComps
-        // Identify series and shunt components
         const seriesComps = passives.filter((c) => c.position === 'series')
-        const shuntComps = passives.filter((c) => c.position === 'shunt')
+        const fbComp = passives.find((c) => c.position === 'feedback') ?? null
+        const shuntComp = passives.find((c) => c.position === 'shunt') ?? null
 
         const lineY = mainLineY + WIRE_CENTER_Y
 
-        // Series component 1 position
         const s1x = stageX + 10
-        // Series component 2 position
         const s2x = stageX + 110
-        // Junction between series 1 and series 2
-        const junctionX = s1x + SERIES_W + 15
-        // Junction after series 2 (before op-amp)
-        const junction2X = s2x + SERIES_W + 10
+        const junctionX = s1x + SERIES_W + 15     // Junction1: between series1 and series2
+        const junction2X = s2x + SERIES_W + 10    // Junction2: after series2, before op-amp+
+
+        const opOutX = stageX + opAmpX + 40
+        const opOutY = opAmpY + 20
 
         return (
           <g key={stageIdx}>
@@ -872,7 +899,7 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
             <line x1={stageX} y1={lineY} x2={s1x} y2={lineY}
               stroke="currentColor" strokeWidth="1.5" />
 
-            {/* Series component 1 */}
+            {/* Series component 1 (R1 for LPF, C1 for HPF) */}
             {seriesComps[0] && (
               <g>
                 <SeriesGlyph type={seriesComps[0].type} x={s1x} y={mainLineY} />
@@ -887,36 +914,16 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
               </g>
             )}
 
-            {/* Wire to junction */}
+            {/* Wire to junction1 */}
             <line x1={s1x + SERIES_W} y1={lineY} x2={junctionX} y2={lineY}
               stroke="currentColor" strokeWidth="1.5" />
             <circle cx={junctionX} cy={lineY} r="2.5" fill="currentColor" />
 
-            {/* Shunt component 1 (from junction to ground) */}
-            {shuntComps[0] && (
-              <g>
-                <line x1={junctionX} y1={lineY} x2={junctionX} y2={lineY + 10}
-                  stroke="currentColor" strokeWidth="1.5" />
-                <ShuntGlyph type={shuntComps[0].type} centerX={junctionX} topY={lineY + 10} />
-                <text x={junctionX + 18} y={lineY + 10 + shuntHeight(shuntComps[0].type) / 2 - 4}
-                  fontSize="8" fill="#374151" fontWeight="bold">
-                  {shuntComps[0].id.replace(/^S\d+_/, '')}
-                </text>
-                <text x={junctionX + 18} y={lineY + 10 + shuntHeight(shuntComps[0].type) / 2 + 8}
-                  fontSize="8" fill="#6b7280">
-                  {formatComponentValue(shuntComps[0])}
-                </text>
-                <line x1={junctionX} y1={lineY + 10 + shuntHeight(shuntComps[0].type)} x2={junctionX} y2={gndY}
-                  stroke="currentColor" strokeWidth="1.5" />
-                <Ground x={junctionX} y={gndY} />
-              </g>
-            )}
-
-            {/* Wire junction to series 2 */}
+            {/* Wire junction1 → series 2 */}
             <line x1={junctionX} y1={lineY} x2={s2x} y2={lineY}
               stroke="currentColor" strokeWidth="1.5" />
 
-            {/* Series component 2 */}
+            {/* Series component 2 (R2 for LPF, C2 for HPF) */}
             {seriesComps[1] && (
               <g>
                 <SeriesGlyph type={seriesComps[1].type} x={s2x} y={mainLineY} />
@@ -931,42 +938,54 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
               </g>
             )}
 
-            {/* Wire to junction 2 (op-amp non-inv input) */}
+            {/* Wire to junction2 */}
             <line x1={s2x + SERIES_W} y1={lineY} x2={junction2X} y2={lineY}
               stroke="currentColor" strokeWidth="1.5" />
             <circle cx={junction2X} cy={lineY} r="2.5" fill="currentColor" />
 
-            {/* Shunt component 2 (feedback from output to junction2) */}
-            {shuntComps[1] && (
+            {/* Shunt component (C2 for LPF / R2 for HPF): junction2 → GND */}
+            {shuntComp && (
               <g>
-                {/* Down from junction2 */}
                 <line x1={junction2X} y1={lineY} x2={junction2X} y2={lineY + 10}
                   stroke="currentColor" strokeWidth="1.5" />
-                <ShuntGlyph type={shuntComps[1].type} centerX={junction2X} topY={lineY + 10} />
-                <text x={junction2X - 18} y={lineY + 10 + shuntHeight(shuntComps[1].type) / 2 - 4}
-                  textAnchor="end" fontSize="8" fill="#374151" fontWeight="bold">
-                  {shuntComps[1].id.replace(/^S\d+_/, '')}
+                <ShuntGlyph type={shuntComp.type} centerX={junction2X} topY={lineY + 10} />
+                <text x={junction2X + 18} y={lineY + 10 + shuntHeight(shuntComp.type) / 2 - 4}
+                  fontSize="8" fill="#374151" fontWeight="bold">
+                  {shuntComp.id.replace(/^S\d+_/, '')}
                 </text>
-                <text x={junction2X - 18} y={lineY + 10 + shuntHeight(shuntComps[1].type) / 2 + 8}
-                  textAnchor="end" fontSize="8" fill="#6b7280">
-                  {formatComponentValue(shuntComps[1])}
+                <text x={junction2X + 18} y={lineY + 10 + shuntHeight(shuntComp.type) / 2 + 8}
+                  fontSize="8" fill="#6b7280">
+                  {formatComponentValue(shuntComp)}
                 </text>
-                {/* Connect bottom of C2 to op-amp output (feedback wire) */}
-                {(() => {
-                  const c2BottomY = lineY + 10 + shuntHeight(shuntComps[1].type)
-                  const fbWireY = c2BottomY + 10
-                  const opOutX = stageX + opAmpX + 40
-                  return (
-                    <>
-                      <line x1={junction2X} y1={c2BottomY} x2={junction2X} y2={fbWireY}
-                        stroke="currentColor" strokeWidth="1.5" />
-                      <line x1={junction2X} y1={fbWireY} x2={opOutX} y2={fbWireY}
-                        stroke="currentColor" strokeWidth="1.5" />
-                      <line x1={opOutX} y1={fbWireY} x2={opOutX} y2={opAmpY + 20}
-                        stroke="currentColor" strokeWidth="1.5" />
-                    </>
-                  )
-                })()}
+                <line x1={junction2X} y1={lineY + 10 + shuntHeight(shuntComp.type)} x2={junction2X} y2={gndY}
+                  stroke="currentColor" strokeWidth="1.5" />
+                <Ground x={junction2X} y={gndY} />
+              </g>
+            )}
+
+            {/* Feedback component (C1 for LPF / R1 for HPF): junction1 → op-amp output */}
+            {fbComp && (
+              <g>
+                {/* Wire down from junction1 to feedback path level */}
+                <line x1={junctionX} y1={lineY} x2={junctionX} y2={fbPathY}
+                  stroke="currentColor" strokeWidth="1.5" />
+                {/* Horizontal feedback component */}
+                <SeriesGlyph type={fbComp.type} x={junctionX} y={fbPathY - WIRE_CENTER_Y} />
+                {/* Wire from component end to op-amp output X */}
+                <line x1={junctionX + SERIES_W} y1={fbPathY} x2={opOutX} y2={fbPathY}
+                  stroke="currentColor" strokeWidth="1.5" />
+                {/* Wire up to op-amp output */}
+                <line x1={opOutX} y1={fbPathY} x2={opOutX} y2={opOutY}
+                  stroke="currentColor" strokeWidth="1.5" />
+                {/* Label below the feedback component */}
+                <text x={junctionX + SERIES_W / 2} y={fbPathY + 16}
+                  textAnchor="middle" fontSize="9" fill="#374151" fontWeight="bold">
+                  {fbComp.id.replace(/^S\d+_/, '')}
+                </text>
+                <text x={junctionX + SERIES_W / 2} y={fbPathY + 28}
+                  textAnchor="middle" fontSize="8" fill="#6b7280">
+                  {formatComponentValue(fbComp)}
+                </text>
               </g>
             )}
 
@@ -975,23 +994,19 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
               stroke="currentColor" strokeWidth="1.5" />
 
             {/* Op-amp inverting input (−) → connected to output (unity gain) */}
-            <line x1={stageX + opAmpX} y1={opAmpY + 30}
-              x2={stageX + opAmpX - 10} y2={opAmpY + 30}
-              stroke="currentColor" strokeWidth="1.5" />
-            {/* Wire down then right to output */}
             {(() => {
-              const invX = stageX + opAmpX - 10
-              const invY = opAmpY + 30
-              const opOutX = stageX + opAmpX + 40
-              const opOutY = opAmpY + 20
-              const wireDownY = invY + 16
+              const invPinX = stageX + opAmpX
+              const invPinY = opAmpY + 30
+              const invWireX = invPinX - 10
               return (
                 <>
-                  <line x1={invX} y1={invY} x2={invX} y2={wireDownY}
+                  <line x1={invPinX} y1={invPinY} x2={invWireX} y2={invPinY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  <line x1={invX} y1={wireDownY} x2={opOutX} y2={wireDownY}
+                  <line x1={invWireX} y1={invPinY} x2={invWireX} y2={invFbY}
                     stroke="currentColor" strokeWidth="1.5" />
-                  <line x1={opOutX} y1={wireDownY} x2={opOutX} y2={opOutY}
+                  <line x1={invWireX} y1={invFbY} x2={opOutX} y2={invFbY}
+                    stroke="currentColor" strokeWidth="1.5" />
+                  <line x1={opOutX} y1={invFbY} x2={opOutX} y2={opOutY}
                     stroke="currentColor" strokeWidth="1.5" />
                 </>
               )
@@ -1009,14 +1024,14 @@ function SallenKeyLayout({ components }: { components: Component[] }) {
             )}
 
             {/* Output wire */}
-            <line x1={stageX + opAmpX + 40} y1={opAmpY + 20}
-              x2={stageX + stageW} y2={opAmpY + 20}
+            <line x1={opOutX} y1={opOutY}
+              x2={stageX + stageW} y2={opOutY}
               stroke="currentColor" strokeWidth="1.5" />
-            <circle cx={stageX + opAmpX + 40} cy={opAmpY + 20} r="2.5" fill="currentColor" />
+            <circle cx={opOutX} cy={opOutY} r="2.5" fill="currentColor" />
 
             {/* Inter-stage wire */}
             {stageIdx < stages.length - 1 && (
-              <line x1={stageX + stageW} y1={opAmpY + 20}
+              <line x1={stageX + stageW} y1={opOutY}
                 x2={stageX + stageW + stageGap} y2={lineY}
                 stroke="currentColor" strokeWidth="1.5" />
             )}

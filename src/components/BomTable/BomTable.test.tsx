@@ -11,7 +11,7 @@ const SAMPLE_COMPONENTS: Component[] = [
 
 const SALLEN_KEY_COMPONENTS: Component[] = [
   { id: 'S1_R1', type: 'resistor', value: 10000, position: 'series' },
-  { id: 'S1_C1', type: 'capacitor', value: 1.59e-8, position: 'shunt' },
+  { id: 'S1_C1', type: 'capacitor', value: 1.59e-8, position: 'feedback' },
   { id: 'S1_U', type: 'opamp', value: 0, position: 'active' },
 ]
 
